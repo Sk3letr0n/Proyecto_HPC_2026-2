@@ -1,0 +1,39 @@
+# ---------- Binarios y objetos de C ----------
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+
+# Carpeta donde el Makefile deja el ejecutable
+bin/
+build/
+
+# ---------- Depuración / perfilado ----------
+*.gcda
+*.gcno
+*.gcov
+gmon.out
+core
+*.stackdump
+vgcore.*
+perf.data*
+
+# ---------- Editores / IDE ----------
+.vscode/
+.idea/
+*.swp
+*~
+
+# ---------- Sistema operativo ----------
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---------- Salidas de experimentos ----------
+resultados/
+*.csv.tmp
