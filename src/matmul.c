@@ -9,6 +9,7 @@
  *    - Reserva dinamica de memoria (bloque contiguo + vector de punteros).
  *    - Ejecucion parametrica: todo se pasa por linea de comandos, el programa
  *      nunca se queda esperando entrada del usuario.
+ *    - El tamano admite las formas "5" y "5x5" (filas por columnas).
  *
  *  Compilacion:
  *      gcc -O2 -Wall -Wextra -std=c11 -o bin/matmul src/matmul.c
@@ -241,11 +242,15 @@ static const char *nombre_programa(const char *ruta)
 static void mostrar_uso(const char *prog)
 {
     printf(
-    "Uso: %s -n <orden> -l <limite> [-s <semilla>] [-p] [-c]\n"
-    "     %s <orden> <limite> [semilla]\n"
+    "Uso: %s -n <tamano> -l <limite> [-s <semilla>] [-p] [-c]\n"
+    "     %s <tamano> <limite> [semilla] [-p] [-c]\n"
     "\n"
     "Opciones:\n"
-    "  -n <orden>     Orden N de las matrices cuadradas NxN (obligatorio).\n"
+    "  -n <tamano>    Tamano de las matrices (obligatorio). Dos formas validas:\n"
+    "                   5     un solo numero\n"
+    "                   5x5   filas por columnas\n"
+    "                 Las matrices son cuadradas: en la forma FxC ambos numeros\n"
+    "                 deben coincidir. Escribalo sin espacios.\n"
     "  -l <limite>    Valor maximo de cada celda; genera enteros en [1, limite]\n"
     "                 (obligatorio). Debe cumplir  N * limite^2 <= %d.\n"
     "  -s <semilla>   Semilla del generador aleatorio. Por defecto usa el reloj.\n"
@@ -255,9 +260,9 @@ static void mostrar_uso(const char *prog)
     "  -h             Muestra esta ayuda.\n"
     "\n"
     "Ejemplos:\n"
-    "  %s -n 4 -l 9 -s 42 -p\n"
+    "  %s -n 5x5 -l 9 -s 42 -p\n"
     "  %s -n 1000 -l 100\n"
-    "  %s 512 50 7\n",
+    "  %s 512x512 50 7\n",
     prog, prog, INT_MAX, prog, prog, prog);
 }
 
@@ -272,6 +277,65 @@ static int leer_entero(const char *texto, long *destino)
     long valor = strtol(texto, &sobrante, 10);
     if (errno != 0 || sobrante == texto || *sobrante != '\0') return 0;
     *destino = valor;
+    return 1;
+}
+
+/* ---------------------------------------------------------------------------
+ *  LECTURA DEL TAMANO DE LA MATRIZ
+ *
+ *  Admite dos formas equivalentes:
+ *      "5"     -> un solo numero
+ *      "5x5"   -> filas por columnas (tambien vale "5X5")
+ *
+ *  Como el proyecto trabaja con matrices CUADRADAS, en la forma "FxC" se
+ *  exige que ambos valores coincidan; si no, se rechaza con un mensaje que
+ *  explica el motivo en lugar de tomar uno de los dos en silencio.
+ *
+ *  Devuelve 1 si el tamano es valido, 0 si no.
+ * ------------------------------------------------------------------------- */
+static int leer_dimension(const char *texto, long *destino)
+{
+    const char *separador = strpbrk(texto, "xX");
+
+    /* Forma simple: un unico numero. */
+    if (separador == NULL) {
+        if (!leer_entero(texto, destino)) {
+            fprintf(stderr, "Error: '%s' no es un tamano valido. "
+                            "Use por ejemplo 5 o 5x5.\n", texto);
+            return 0;
+        }
+        return 1;
+    }
+
+    /* Forma FxC: se copia la parte de las filas para poder convertirla. */
+    char filas_txt[32];
+    size_t largo = (size_t)(separador - texto);
+    if (largo == 0 || largo >= sizeof(filas_txt)) {
+        fprintf(stderr, "Error: '%s' no es un tamano valido. "
+                        "Use por ejemplo 5 o 5x5.\n", texto);
+        return 0;
+    }
+    memcpy(filas_txt, texto, largo);
+    filas_txt[largo] = '\0';
+
+    long filas = 0, columnas = 0;
+    if (!leer_entero(filas_txt, &filas) ||
+        !leer_entero(separador + 1, &columnas)) {
+        fprintf(stderr, "Error: '%s' no es un tamano valido. "
+                        "Use por ejemplo 5 o 5x5.\n", texto);
+        return 0;
+    }
+
+    if (filas != columnas) {
+        fprintf(stderr,
+            "Error: las matrices deben ser cuadradas, pero se pidio %ldx%ld.\n"
+            "       El numero de filas y el de columnas deben coincidir,\n"
+            "       por ejemplo %ldx%ld.\n",
+            filas, columnas, filas, filas);
+        return 0;
+    }
+
+    *destino = filas;
     return 1;
 }
 
@@ -297,18 +361,27 @@ int main(int argc, char *argv[])
     }
 
     if (argv[1][0] != '-') {
-        /* Forma posicional:  matmul N L [S] */
+        /* Forma posicional:  matmul <tamano> <limite> [semilla] [-p] [-c] */
         if (argc < 3) {
             fprintf(stderr, "Error: faltan parametros.\n\n");
             mostrar_uso(prog);
             return EXIT_FAILURE;
         }
-        if (!leer_entero(argv[1], &n) || !leer_entero(argv[2], &limite)) {
-            fprintf(stderr, "Error: los parametros deben ser numeros enteros.\n");
+        if (!leer_dimension(argv[1], &n)) {
             return EXIT_FAILURE;
         }
-        if (argc >= 4 && !leer_entero(argv[3], &semilla)) {
-            fprintf(stderr, "Error: la semilla debe ser un numero entero.\n");
+        if (!leer_entero(argv[2], &limite)) {
+            fprintf(stderr, "Error: el limite ('%s') debe ser un numero "
+                            "entero.\n", argv[2]);
+            return EXIT_FAILURE;
+        }
+        /* El resto son la semilla y/o las banderas -p y -c, en cualquier orden. */
+        for (int i = 3; i < argc; i++) {
+            if (strcmp(argv[i], "-p") == 0) { imprimir = 1; continue; }
+            if (strcmp(argv[i], "-c") == 0) { modo_csv = 1; continue; }
+            if (semilla < 0 && leer_entero(argv[i], &semilla)) continue;
+            fprintf(stderr, "Error: parametro '%s' no reconocido.\n\n", argv[i]);
+            mostrar_uso(prog);
             return EXIT_FAILURE;
         }
     } else {
@@ -323,8 +396,20 @@ int main(int argc, char *argv[])
             if (strcmp(op, "-p") == 0) { imprimir = 1; continue; }
             if (strcmp(op, "-c") == 0) { modo_csv = 1; continue; }
 
-            if (strcmp(op, "-n") == 0 || strcmp(op, "-l") == 0 ||
-                strcmp(op, "-s") == 0) {
+            /* -n acepta tanto "5" como "5x5", por eso se trata aparte. */
+            if (strcmp(op, "-n") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: la opcion -n requiere un valor.\n");
+                    return EXIT_FAILURE;
+                }
+                if (!leer_dimension(argv[i + 1], &n)) {
+                    return EXIT_FAILURE;
+                }
+                i++;
+                continue;
+            }
+
+            if (strcmp(op, "-l") == 0 || strcmp(op, "-s") == 0) {
                 if (i + 1 >= argc) {
                     fprintf(stderr, "Error: la opcion %s requiere un valor.\n", op);
                     return EXIT_FAILURE;
@@ -334,9 +419,8 @@ int main(int argc, char *argv[])
                                     "valido.\n", op, argv[i + 1]);
                     return EXIT_FAILURE;
                 }
-                if      (op[1] == 'n') n       = valor;
-                else if (op[1] == 'l') limite  = valor;
-                else                   semilla = valor;
+                if (op[1] == 'l') limite  = valor;
+                else              semilla = valor;
                 i++;
                 continue;
             }

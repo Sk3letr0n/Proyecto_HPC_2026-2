@@ -10,7 +10,7 @@ contra versiones paralelas (OpenMP, MPI, CUDA).
 
 | Requisito | Implementación |
 |---|---|
-| Matrices cuadradas | Orden `N × N`, mismo número de filas y columnas |
+| Matrices cuadradas | Orden `N × N`, mismo número de filas y columnas. El tamaño se indica como `5` o como `5x5` |
 | Tipo de dato | `int` (entero simple con signo, 32 bits) — **no** `long`, **no** `double` |
 | Valores | Enteros **positivos** aleatorios en el rango cerrado `[1, L]` |
 | Control de desbordamiento | Se valida que `N · L² ≤ INT_MAX` antes de reservar memoria |
@@ -126,31 +126,58 @@ Si la carpeta `bin` no existe hay que crearla antes: `mkdir bin` en PowerShell,
 ### 3.5 Parámetros de línea de comandos
 
 ```
-Uso: matmul -n <orden> -l <limite> [-s <semilla>] [-p] [-c]
-     matmul <orden> <limite> [semilla]
+Uso: matmul -n <tamaño> -l <limite> [-s <semilla>] [-p] [-c]
+     matmul <tamaño> <limite> [semilla] [-p] [-c]
 ```
 
 | Opción | Descripción |
 |---|---|
-| `-n <orden>` | Orden `N` de las matrices `N × N`. **Obligatorio** |
+| `-n <tamaño>` | Tamaño de las matrices. Admite **dos formas equivalentes**: `5` (un solo número) o `5x5` (filas por columnas). **Obligatorio** |
 | `-l <limite>` | Valor máximo de celda; genera enteros en `[1, límite]`. **Obligatorio** |
 | `-s <semilla>` | Semilla del generador aleatorio. Por defecto usa el reloj del sistema. Fijarla hace la ejecución **reproducible** |
 | `-p` | Imprime las matrices A, B y C (solo para `N` pequeño) |
 | `-c` | Salida en una sola línea CSV: `n,limite,semilla,segundos` |
 | `-h` | Muestra la ayuda |
 
-Se aceptan también los parámetros en forma posicional: `matmul 512 50 7`.
+Se aceptan también los parámetros en forma posicional: `matmul 512x512 50 7`.
+
+#### Indicar el tamaño como «filas por columnas»
+
+El tamaño se puede escribir de las dos maneras, según lo que resulte más
+natural:
+
+```powershell
+.\bin\matmul.exe -n 5     -l 9    # un solo número
+.\bin\matmul.exe -n 5x5   -l 9    # filas por columnas, equivalente al anterior
+.\bin\matmul.exe -n 5X5   -l 9    # la X mayúscula también vale
+```
+
+Reglas de esta notación:
+
+- **Se escribe sin espacios**: `5x5`, no `5 x 5`. Con espacios la consola lo
+  parte en tres argumentos distintos y el programa no puede reconocerlo.
+- **Ambos números deben coincidir**, porque las matrices del proyecto son
+  cuadradas. Si no coinciden, el programa se detiene y lo explica en vez de
+  quedarse callado con uno de los dos valores:
+
+```
+$ .\bin\matmul.exe -n 3x5 -l 9
+Error: las matrices deben ser cuadradas, pero se pidio 3x5.
+       El numero de filas y el de columnas deben coincidir,
+       por ejemplo 3x3.
+```
 
 ### 3.6 Ejemplos
 
 En PowerShell:
 
 ```powershell
-.\bin\matmul.exe -n 5 -l 9 -s 42 -p    # demostración visible
-.\bin\matmul.exe -n 1024 -l 100        # medición de rendimiento
-.\bin\matmul.exe -n 2000 -l 50 -c      # una línea CSV, ideal para scripts
-.\bin\matmul.exe 256 50 7              # forma posicional
-.\bin\matmul.exe -h                    # ayuda
+.\bin\matmul.exe -n 5x5 -l 9 -s 42 -p   # demostración visible
+.\bin\matmul.exe -n 1024 -l 100         # medición de rendimiento
+.\bin\matmul.exe -n 2000 -l 50 -c       # una línea CSV, ideal para scripts
+.\bin\matmul.exe 256x256 50 7           # forma posicional
+.\bin\matmul.exe 5x5 9 42 -p            # posicional con banderas al final
+.\bin\matmul.exe -h                     # ayuda
 ```
 
 En Git Bash, Linux o WSL es lo mismo con `./bin/matmul`.
