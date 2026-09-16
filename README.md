@@ -42,25 +42,74 @@ como bitácora del proyecto y como evidencia del proceso de construcción.
 
 ## 3. Compilación y ejecución
 
-### 3.1 Con Makefile
+### 3.1 Requisitos
 
-En **Windows (MSYS2 / MinGW)** el binario de GNU Make se llama `mingw32-make`:
+Hacen falta **gcc** y **GNU Make**. En Windows se obtienen instalando
+[MSYS2](https://www.msys2.org/); el compilador queda en `C:\msys64\ucrt64\bin`,
+ruta que debe estar en el `PATH` del sistema.
 
-```bash
-mingw32-make            # compila -> bin/matmul.exe
-mingw32-make demo       # ejecución 5x5 imprimiendo las tres matrices
-mingw32-make run N=1024 L=100 S=42
-mingw32-make bench      # barrido de tamaños, salida CSV
-mingw32-make debug      # compila con -O0 -g3 para depurar con gdb
-mingw32-make asan       # compila con AddressSanitizer (requiere libasan)
-mingw32-make clean
+> ⚠️ En Windows el ejecutable de GNU Make se llama **`mingw32-make`**, no `make`.
+
+Comprobación previa (sirve en cualquier consola):
+
+```
+gcc --version
+mingw32-make --version
 ```
 
-En **Linux / WSL / macOS** el mismo Makefile funciona con `make`.
+### 3.2 Compilar y ejecutar con el Makefile
 
-### 3.2 Compilación manual
+Abre la consola, sitúate en la raíz del proyecto y lanza el target que quieras:
 
-```bash
+```powershell
+cd C:\Repositorios\Proyecto_HPC_2026-2
+
+mingw32-make                        # compila -> bin\matmul.exe
+mingw32-make demo                   # ejecución 5x5 imprimiendo las tres matrices
+mingw32-make run N=1024 L=100 S=42  # ejecución parametrizada
+mingw32-make bench                  # barrido de tamaños, salida CSV
+mingw32-make info                   # diagnóstico: qué consola detectó
+mingw32-make help                   # lista de targets
+mingw32-make clean                  # borra bin/
+```
+
+Los parámetros de `run` se sobrescriben desde la propia línea de comandos: `N` es
+el orden de la matriz, `L` el límite de valor de celda y `S` la semilla.
+
+En **Linux, WSL o macOS** son los mismos targets, con `make` en vez de
+`mingw32-make`.
+
+#### Por qué el Makefile detecta la consola
+
+GNU Make en Windows busca `sh.exe` en el `PATH`. Desde **Git Bash** lo encuentra
+y ejecuta las recetas con un shell Unix; desde **PowerShell o CMD** no lo
+encuentra y las ejecuta con **`cmd.exe`**, donde `mkdir -p` o `rm -rf` no
+existen. Por eso el Makefile comprueba si `SHELL` trae una ruta completa y elige
+los comandos apropiados en cada caso. Con `mingw32-make info` se ve qué detectó:
+
+```
+Consola detectada : cmd.exe          <- PowerShell / CMD
+Consola detectada : .../sh.exe       <- Git Bash / MSYS2
+```
+
+### 3.3 Ejecutar el binario directamente
+
+Una vez compilado, el ejecutable queda en `bin\matmul.exe` y se invoca de forma
+distinta según la consola:
+
+| Consola | Sintaxis |
+|---|---|
+| PowerShell | `.\bin\matmul.exe -n 512 -l 100` |
+| CMD | `bin\matmul.exe -n 512 -l 100` |
+| Git Bash / MSYS2 | `./bin/matmul -n 512 -l 100` |
+| Linux / WSL / macOS | `./bin/matmul -n 512 -l 100` |
+
+En PowerShell el prefijo `.\` es **obligatorio**: por seguridad no ejecuta
+binarios del directorio actual sin él.
+
+### 3.4 Compilación manual, sin Makefile
+
+```
 gcc -O2 -Wall -Wextra -Wpedantic -std=c11 -o bin/matmul src/matmul.c -lm
 ```
 
@@ -71,7 +120,10 @@ gcc -O2 -Wall -Wextra -Wpedantic -std=c11 -o bin/matmul src/matmul.c -lm
 | `-std=c11` | Estándar del lenguaje |
 | `-lm` | Enlaza la librería matemática, requerida por `sqrt()` |
 
-### 3.3 Parámetros de línea de comandos
+Si la carpeta `bin` no existe hay que crearla antes: `mkdir bin` en PowerShell,
+`mkdir -p bin` en Git Bash.
+
+### 3.5 Parámetros de línea de comandos
 
 ```
 Uso: matmul -n <orden> -l <limite> [-s <semilla>] [-p] [-c]
@@ -89,13 +141,25 @@ Uso: matmul -n <orden> -l <limite> [-s <semilla>] [-p] [-c]
 
 Se aceptan también los parámetros en forma posicional: `matmul 512 50 7`.
 
-### 3.4 Ejemplos
+### 3.6 Ejemplos
 
-```bash
-./bin/matmul -n 5 -l 9 -s 42 -p     # demostración visible
-./bin/matmul -n 1024 -l 100         # medición de rendimiento
-./bin/matmul -n 2000 -l 50 -c       # una línea CSV, ideal para scripts
-./bin/matmul 256 50 7               # forma posicional
+En PowerShell:
+
+```powershell
+.\bin\matmul.exe -n 5 -l 9 -s 42 -p    # demostración visible
+.\bin\matmul.exe -n 1024 -l 100        # medición de rendimiento
+.\bin\matmul.exe -n 2000 -l 50 -c      # una línea CSV, ideal para scripts
+.\bin\matmul.exe 256 50 7              # forma posicional
+.\bin\matmul.exe -h                    # ayuda
+```
+
+En Git Bash, Linux o WSL es lo mismo con `./bin/matmul`.
+
+Para guardar un barrido de tiempos en un archivo:
+
+```powershell
+mingw32-make bench | Out-File -Encoding utf8 resultados.csv   # PowerShell
+mingw32-make bench > resultados.csv                           # Git Bash / Linux
 ```
 
 Salida típica:

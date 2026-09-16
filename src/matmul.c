@@ -221,6 +221,21 @@ static void matriz_imprimir(const Matriz *m, const char *nombre)
 }
 
 /* ---------------------------------------------------------------------------
+ *  Extrae el nombre del ejecutable de la ruta completa que llega en argv[0].
+ *  PowerShell y CMD entregan la ruta absoluta; sin esto la ayuda mostraria
+ *  algo como "C:\Repositorios\...\bin\matmul.exe" en cada linea.
+ *  Se aceptan los dos separadores porque en Windows conviven ambos.
+ * ------------------------------------------------------------------------- */
+static const char *nombre_programa(const char *ruta)
+{
+    const char *base = ruta;
+    for (const char *p = ruta; *p != '\0'; p++) {
+        if (*p == '/' || *p == '\\') base = p + 1;
+    }
+    return base;
+}
+
+/* ---------------------------------------------------------------------------
  *  AYUDA / USO
  * ------------------------------------------------------------------------- */
 static void mostrar_uso(const char *prog)
@@ -272,9 +287,12 @@ int main(int argc, char *argv[])
     int  modo_csv = 0;      /* bandera -c            */
     long valor = 0;
 
+    /* Nombre corto del ejecutable, para los mensajes de ayuda. */
+    const char *prog = nombre_programa(argv[0]);
+
     /* ----- 1. Lectura de parametros de la linea de comandos ----- */
     if (argc == 1) {
-        mostrar_uso(argv[0]);
+        mostrar_uso(prog);
         return EXIT_FAILURE;
     }
 
@@ -282,7 +300,7 @@ int main(int argc, char *argv[])
         /* Forma posicional:  matmul N L [S] */
         if (argc < 3) {
             fprintf(stderr, "Error: faltan parametros.\n\n");
-            mostrar_uso(argv[0]);
+            mostrar_uso(prog);
             return EXIT_FAILURE;
         }
         if (!leer_entero(argv[1], &n) || !leer_entero(argv[2], &limite)) {
@@ -299,7 +317,7 @@ int main(int argc, char *argv[])
             const char *op = argv[i];
 
             if (strcmp(op, "-h") == 0 || strcmp(op, "--help") == 0) {
-                mostrar_uso(argv[0]);
+                mostrar_uso(prog);
                 return EXIT_SUCCESS;
             }
             if (strcmp(op, "-p") == 0) { imprimir = 1; continue; }
@@ -324,7 +342,7 @@ int main(int argc, char *argv[])
             }
 
             fprintf(stderr, "Error: opcion desconocida '%s'.\n\n", op);
-            mostrar_uso(argv[0]);
+            mostrar_uso(prog);
             return EXIT_FAILURE;
         }
     }
