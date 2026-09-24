@@ -362,7 +362,8 @@ static void mostrar_uso(const char *prog)
     "                 del sistema (aqui: %d). Se acota a [1, N].\n"
     "  -s <semilla>   Semilla del generador aleatorio. Por defecto usa el reloj.\n"
     "  -p             Imprime las matrices A, B y C (usar solo con N pequeno).\n"
-    "  -c             Salida CSV en una linea: n,limite,semilla,hilos,segundos\n"
+    "  -c             Salida en una sola linea separada por ';' (para Excel):\n"
+    "                   Orden;NumHilos;Tiempo(s);Rendimiento(GOP/s)\n"
     "  -h             Muestra esta ayuda.\n"
     "\n"
     "Ejemplos:\n"
@@ -599,13 +600,16 @@ int main(int argc, char *argv[])
     }
 
     /* ----- 6. Reporte ----- */
+    double operaciones = 2.0 * (double)n * (double)n * (double)n;
+    double gops = operaciones / (segundos > 0.0 ? segundos : 1e-9) / 1e9;
+
     if (modo_csv) {
-        printf("%ld,%ld,%ld,%ld,%.6f\n", n, limite, semilla, hilos, segundos);
+        /* Linea unica separada por punto y coma, lista para pegar en Excel:
+         *   Orden ; NumHilos ; Tiempo(s) ; Rendimiento(GOP/s)              */
+        printf("%ldx%ld;%ld;%.6f;%.3f\n", n, n, hilos, segundos, gops);
     } else {
         double mib = (double)((size_t)n * (size_t)n * sizeof(int))
                      / (1024.0 * 1024.0);
-        double operaciones = 2.0 * (double)n * (double)n * (double)n;
-        double gops = operaciones / (segundos > 0.0 ? segundos : 1e-9) / 1e9;
 
         printf("=============================================\n");
         printf("  Multiplicacion de matrices (HILOS)  C = A x B\n");
