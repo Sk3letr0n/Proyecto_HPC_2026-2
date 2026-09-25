@@ -316,6 +316,18 @@ static int matriz_multiplicar_hilos(const Matriz *A, const Matriz *B,
 }
 
 /* ---------------------------------------------------------------------------
+ *  Formatea un double con coma decimal (identica a matmul.c). Se reemplaza el
+ *  punto a mano para no depender del locale del sistema.
+ * ------------------------------------------------------------------------- */
+static void formato_coma(char *destino, size_t tam, double valor, int decimales)
+{
+    snprintf(destino, tam, "%.*f", decimales, valor);
+    for (char *p = destino; *p != '\0'; p++) {
+        if (*p == '.') *p = ',';
+    }
+}
+
+/* ---------------------------------------------------------------------------
  *  IMPRESION (identica a matmul.c; solo util con -p y N pequeno)
  * ------------------------------------------------------------------------- */
 static void matriz_imprimir(const Matriz *m, const char *nombre)
@@ -605,8 +617,12 @@ int main(int argc, char *argv[])
 
     if (modo_csv) {
         /* Linea unica separada por punto y coma, lista para pegar en Excel:
-         *   Orden ; NumHilos ; Tiempo(s) ; Rendimiento(GOP/s)              */
-        printf("%ldx%ld;%ld;%.6f;%.3f\n", n, n, hilos, segundos, gops);
+         *   Orden ; NumHilos ; Tiempo(s) ; Rendimiento(GOP/s)
+         * El orden va como un solo numero y los decimales con coma.          */
+        char t_txt[32], g_txt[32];
+        formato_coma(t_txt, sizeof t_txt, segundos, 6);
+        formato_coma(g_txt, sizeof g_txt, gops, 3);
+        printf("%ld;%ld;%s;%s\n", n, hilos, t_txt, g_txt);
     } else {
         double mib = (double)((size_t)n * (size_t)n * sizeof(int))
                      / (1024.0 * 1024.0);

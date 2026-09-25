@@ -208,6 +208,19 @@ static void matriz_multiplicar(const Matriz *A, const Matriz *B, Matriz *C)
 }
 
 /* ---------------------------------------------------------------------------
+ *  Formatea un double con coma decimal (ej. 0,004 en vez de 0.004), que es lo
+ *  que espera Excel con configuracion regional en espanol. Se reemplaza el
+ *  punto a mano para no depender del locale del sistema.
+ * ------------------------------------------------------------------------- */
+static void formato_coma(char *destino, size_t tam, double valor, int decimales)
+{
+    snprintf(destino, tam, "%.*f", decimales, valor);
+    for (char *p = destino; *p != '\0'; p++) {
+        if (*p == '.') *p = ',';
+    }
+}
+
+/* ---------------------------------------------------------------------------
  *  IMPRESION (solo util para matrices pequenas, con la opcion -p)
  * ------------------------------------------------------------------------- */
 static void matriz_imprimir(const Matriz *m, const char *nombre)
@@ -489,8 +502,12 @@ int main(int argc, char *argv[])
 
     if (modo_csv) {
         /* Linea unica separada por punto y coma, lista para pegar en Excel:
-         *   Orden ; Tiempo(s) ; Rendimiento(GOP/s)                         */
-        printf("%ldx%ld;%.6f;%.3f\n", n, n, segundos, gops);
+         *   Orden ; Tiempo(s) ; Rendimiento(GOP/s)
+         * El orden va como un solo numero y los decimales con coma.          */
+        char t_txt[32], g_txt[32];
+        formato_coma(t_txt, sizeof t_txt, segundos, 6);
+        formato_coma(g_txt, sizeof g_txt, gops, 3);
+        printf("%ld;%s;%s\n", n, t_txt, g_txt);
     } else {
         double mib = (double)((size_t)n * (size_t)n * sizeof(int))
                      / (1024.0 * 1024.0);
