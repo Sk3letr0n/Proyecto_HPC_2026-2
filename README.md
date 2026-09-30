@@ -1,8 +1,17 @@
 # Proyecto HPC 2026-2 — Multiplicación de Matrices
 
 Implementación en C del algoritmo clásico de multiplicación de matrices cuadradas
-(`C = A × B`), diseñada como **línea base secuencial** para después compararla
-contra versiones paralelas (OpenMP, MPI, CUDA).
+(`C = A × B`), en tres versiones que comparten el mismo núcleo de cálculo y son
+por tanto comparables 1:1:
+
+| Versión | Fuente | Paralelismo |
+|---|---|---|
+| Secuencial (línea base) | [`src/matmul.c`](src/matmul.c) | — |
+| Hilos | [`src/mmHILOS.c`](src/mmHILOS.c) | POSIX threads (`pthreads`) |
+| Procesos | [`src/mmPROCESOS.c`](src/mmPROCESOS.c) | `fork()` / `CreateProcess` + memoria compartida |
+
+Las secciones 4 a 7 describen la línea base secuencial; la **sección 8** cubre la
+versión con procesos, incluidas las mediciones de *speedup* de las tres.
 
 ---
 
@@ -17,6 +26,7 @@ contra versiones paralelas (OpenMP, MPI, CUDA).
 | Memoria | **Reserva dinámica** con `malloc` / `free` (ver sección 4) |
 | Ejecución | **Paramétrica** por línea de comandos: el programa nunca pide datos por teclado |
 | Medición | Cronómetro de reloj de pared (*wall clock*) sobre el núcleo de cálculo |
+| Paralelismo | Por filas de `C`, que son independientes: sin secciones críticas ni mutex |
 
 ---
 
@@ -25,14 +35,26 @@ contra versiones paralelas (OpenMP, MPI, CUDA).
 ```
 Proyecto_HPC_2026-2/
 ├── src/
-│   └── matmul.c                    # Código fuente completo, comentado
+│   ├── matmul.c                    # Versión SECUENCIAL (línea base)
+│   ├── mmHILOS.c                   # Versión PARALELA con hilos (pthreads)
+│   └── mmPROCESOS.c                # Versión PARALELA con procesos
 ├── docs/
 │   └── conversacion-desarrollo.md  # Bitácora: cómo se construyó el proyecto
-├── bin/                            # Ejecutable generado (ignorado por git)
+├── bin/                            # Ejecutables generados (ignorado por git)
+├── commands.txt                    # Comandos de compilación y de los barridos
+├── resultados_secuencial.csv       # Mediciones de matmul
+├── resultados_hilos.csv            # Mediciones de mmHILOS
+├── resultados_procesos.csv         # Mediciones de mmPROCESOS
 ├── Makefile                        # Compilación y targets de ejecución
 ├── .gitignore
 └── README.md
 ```
+
+Las tres versiones comparten la misma estructura de datos, el mismo llenado
+aleatorio y **exactamente el mismo núcleo de cálculo** (bucles `i-k-j`), así que
+con la misma semilla producen matrices idénticas y el *speedup* medido es
+limpio. Los comandos exactos de compilación y de los barridos de medición están
+en [`commands.txt`](commands.txt).
 
 La carpeta [`docs/`](docs/) contiene el transcript de la sesión de desarrollo:
 cada decisión de diseño, los comandos ejecutados y sus resultados reales. Sirve
@@ -457,9 +479,206 @@ las mismas matrices y el resultado es reproducible.
 
 ---
 
-## 8. Próximos pasos del proyecto
+## 8. Versión paralela con procesos (`mmPROCESOS.c`)
 
+[`src/mmPROCESOS.c`](src/mmPROCESOS.c) es la contraparte con **procesos** de la
+versión con hilos. Comparte con [`matmul.c`](src/matmul.c) y
+[`mmHILOS.c`](src/mmHILOS.c) la misma estructura de datos, el mismo llenado
+aleatorio y **exactamente el mismo núcleo de cálculo** (bucles `i-k-j`), así que
+con la misma semilla las tres producen matrices idénticas y la comparación es
+1:1.
+
+### 8.1 El problema de fondo: los procesos no comparten memoria
+
+Esta es la única diferencia conceptual real frente a los hilos, y es la que
+obliga a reescribir la mecánica del programa:
+
+| | Hilos | Procesos |
+|---|---|---|
+| Espacio de direcciones | **Compartido** | **Uno por proceso** |
+| Pasar `A`, `B`, `C` | Basta un puntero | Hay que pedir memoria compartida al S.O. |
+| Riesgo de carrera | Sí, si se escriben las mismas celdas | Igual, dentro de la zona compartida |
+| Coste de crear uno | Bajo (~microsegundos) | Alto (milisegundos) |
+
+Si un proceso hijo escribiera en «su» `C`, el padre no vería nada: al terminar
+el hijo esa memoria se destruye. Por eso las tres matrices viven en un **único
+bloque de memoria compartida** pedido explícitamente al sistema operativo:
+
+```
+[ A: n*n enteros ][ B: n*n enteros ][ C: n*n enteros ]
+  offset 0          offset n*n        offset 2*n*n
+```
+
+**Un detalle fino que hay que respetar:** dentro del bloque compartido *no* se
+puede guardar el vector de punteros a filas (el campo `fila` que sí usan
+`matmul.c` y `mmHILOS.c`), porque cada proceso puede mapear el bloque en una
+**dirección virtual distinta**; un puntero válido en el padre sería basura en el
+hijo. Por eso el núcleo de cálculo de esta versión indexa siempre de forma plana
+(`base + i*n`) y cada proceso deriva sus punteros de fila en local.
+
+### 8.2 Dos implementaciones, según el sistema operativo
+
+**POSIX (Linux, WSL, macOS): `fork()` + `mmap(MAP_SHARED)`**
+
+`fork()` duplica el proceso actual; el hijo continúa en la misma línea de código
+(devuelve `0` en el hijo y el PID del hijo en el padre). Como el bloque se
+reserva con `MAP_SHARED | MAP_ANONYMOUS` **antes** del `fork`, padre e hijos
+comparten esas páginas físicas y el padre espera con `waitpid()`.
+
+```c
+pid_t pid = fork();
+if (pid == 0) {                      /* HIJO  */
+    calcular_bloque(A, B, C, n, inicio, fin);
+    _exit(EXIT_SUCCESS);             /* _exit: no vacía los buffers de stdio */
+}
+hijos[creados++] = pid;              /* PADRE */
+```
+
+**Windows: `CreateProcess()` + `CreateFileMapping()`**
+
+Windows **no tiene `fork()`**: su API nativa solo sabe crear un proceso nuevo
+ejecutando un programa (el equivalente a `fork` + `exec` de una sola vez). El
+esquema lógico es el mismo, pero el hijo arranca desde cero y recibe su trabajo
+por argumentos en vez de heredarlo:
+
+1. El padre crea un bloque compartido **con nombre** (`CreateFileMapping` sobre
+   `INVALID_HANDLE_VALUE`, es decir respaldado por memoria y no por un fichero).
+   El nombre incluye su PID, así que es único: `Local\mmPROCESOS_<pid>`.
+2. El padre se relanza a sí mismo `P` veces, pasando el nombre del bloque y el
+   rango de filas:
+   `mmPROCESOS --trabajador <nombre> <n> <inicio> <fin>`
+3. Cada hijo abre ese bloque por su nombre (`OpenFileMapping` +
+   `MapViewOfFile`), calcula sus filas y termina.
+4. El padre espera con `WaitForSingleObject` y comprueba el código de salida de
+   cada hijo.
+
+La opción `--trabajador` es interna: se detecta al principio de `main`, antes de
+cualquier otro parseo, y esa rama no imprime nada ni reserva matrices.
+
+> El compilador usado en este proyecto es el de MSYS2/UCRT64, que **no ofrece
+> `fork()`**. Por eso en Windows la ruta real es la de `CreateProcess`, y es la
+> única que está **verificada por ejecución**. La rama con `fork()` está escrita
+> para compilar en Linux/WSL sin cambiar nada más, pero **no se ha podido probar
+> en esta máquina** (no hay ningún toolchain Linux disponible aquí); conviene
+> compilarla y ejecutarla antes de darla por buena.
+
+### 8.3 Reparto del trabajo
+
+Idéntico al de la versión con hilos, porque cada fila de `C` es independiente de
+las demás: se reparten las `n` filas en bloques contiguos, `n / P` a cada
+proceso y **una fila extra** a los primeros `n % P`, de modo que la diferencia
+de carga entre procesos sea de una sola fila como máximo.
+
+`A` y `B` son de solo lectura y cada proceso escribe filas **disjuntas** de `C`:
+no hay condiciones de carrera, y por tanto **no se necesita ningún semáforo ni
+mutex**. La única sincronización es esperar a que todos los hijos terminen.
+
+Si la creación de un proceso falla a mitad de camino, el padre calcula él mismo
+las filas que quedaron sin asignar, para no devolver un resultado parcial.
+
+### 8.4 Compilar y ejecutar
+
+No necesita `-pthread` ni ninguna librería extra:
+
+```powershell
+gcc -O2 -Wall -Wextra -std=c11 -o bin/mmPROCESOS src/mmPROCESOS.c -lm
+```
+
+```powershell
+.\bin\mmPROCESOS.exe -n 1500 -l 100 -np 8          # 8 procesos
+.\bin\mmPROCESOS.exe -n 5x5 -l 9 -s 42 -p          # imprime A, B y C
+.\bin\mmPROCESOS.exe 512x512 50 7 -np 4            # forma posicional
+.\bin\mmPROCESOS.exe -n 1000 -l 100 -np 8 -c       # una línea para Excel
+```
+
+Acepta los mismos parámetros que las otras dos versiones (incluida la notación
+`5x5`), más uno propio:
+
+| Opción | Significado |
+|---|---|
+| `-np <procesos>` | Número de procesos de cálculo. Por defecto, los núcleos lógicos del sistema; se acota a `[1, N]`. Se acepta `-t` como sinónimo, por simetría con `mmHILOS`. |
+
+Con `-c` la línea sale como `Orden;NumProcesos;Tiempo(s);Rendimiento(GOP/s)`,
+con coma decimal, lista para pegar en Excel. Los comandos de los barridos
+completos están en [`commands.txt`](commands.txt).
+
+### 8.5 Resultados medidos
+
+Medido en una máquina de **12 núcleos lógicos**, con `-l 100`. El tiempo medido
+**incluye deliberadamente la creación de los procesos**: ese coste es justamente
+la diferencia real frente a los hilos.
+
+Medianas de [`resultados_procesos.csv`](resultados_procesos.csv) (10 turnos por
+combinación, 120 mediciones):
+
+| Procesos | n = 500 | n = 1000 | n = 1500 |
+|---:|---:|---:|---:|
+| 2 | 0,0309 s | 0,1653 s | 0,5221 s |
+| 4 | 0,0305 s | 0,1071 s | 0,3047 s |
+| 8 | 0,0387 s | 0,0957 s | 0,2465 s |
+| 16 | 0,0690 s | 0,1052 s | 0,2550 s |
+
+Y la comparación directa contra las otras dos versiones, midiendo las tres
+**intercaladas en una sola sesión** (mediana de 5 repeticiones), que es la forma
+en que el *speedup* resulta creíble:
+
+| n | Secuencial | P | Hilos | *Speedup* | Procesos | *Speedup* | Diferencia |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 500 | 0,0321 s | 2 | 0,0171 s | 1,88× | 0,0280 s | 1,15× | +10,9 ms |
+| | | 4 | 0,0147 s | 2,18× | 0,0279 s | 1,15× | +13,2 ms |
+| | | 8 | 0,0094 s | 3,42× | 0,0387 s | **0,83×** | +29,3 ms |
+| | | 16 | 0,0099 s | 3,26× | 0,0640 s | **0,50×** | +54,2 ms |
+| 1000 | 0,2541 s | 2 | 0,1399 s | 1,82× | 0,1500 s | 1,69× | +10,2 ms |
+| | | 4 | 0,0922 s | 2,76× | 0,1010 s | 2,52× | +8,8 ms |
+| | | 8 | 0,0659 s | 3,86× | 0,0911 s | 2,79× | +25,2 ms |
+| | | 16 | 0,0691 s | 3,68× | 0,1018 s | 2,50× | +32,8 ms |
+| 1500 | 0,9404 s | 2 | 0,4871 s | 1,93× | 0,4883 s | 1,93× | +1,3 ms |
+| | | 4 | 0,2826 s | 3,33× | 0,2957 s | 3,18× | +13,1 ms |
+| | | 8 | 0,2058 s | 4,57× | 0,2361 s | 3,98× | +30,4 ms |
+| | | 16 | 0,2150 s | 4,37× | 0,2337 s | 4,02× | +18,7 ms |
+
+### 8.6 Lectura de los resultados
+
+**1. Los hilos siempre ganan, y la diferencia es un coste casi fijo.** La
+columna «Diferencia» no crece con `n`, solo con el número de procesos: son del
+orden de **1 a 4 ms por proceso creado**. Es el precio de `CreateProcess`, que
+tiene que construir un espacio de direcciones nuevo, cargar el ejecutable y sus
+DLL, y arrancar un `main` desde cero. Crear un hilo, en cambio, solo cuesta una
+pila nueva.
+
+**2. Con problemas pequeños, los procesos son contraproducentes.** En `n = 500`
+con 8 y 16 procesos el *speedup* cae **por debajo de 1**: el programa paralelo
+es más lento que el secuencial. Los 54 ms que cuesta crear 16 procesos son más
+que los 32 ms que tarda en multiplicar la matriz entera un solo núcleo. Es el
+caso de libro en que la sobrecarga de paralelizar supera el trabajo útil.
+
+**3. Con problemas grandes, la diferencia se amortiza.** En `n = 1500` el
+cálculo dura casi un segundo en secuencial, así que unas decenas de milisegundos
+de arranque son ruido: los procesos alcanzan 4,02× frente a 4,37× de los hilos,
+un 8 % de diferencia. La regla práctica es que **los procesos solo compiten
+cuando el trabajo por proceso es mucho mayor que el coste de crearlo**.
+
+**4. El *speedup* satura en torno a 4–4,5× con 12 núcleos, en las dos
+versiones.** El techo no lo pone el modelo de paralelismo sino el **ancho de
+banda de memoria**: el núcleo `i-k-j` está vectorizado y hace muy pocas
+operaciones por byte leído, así que a partir de 8 hilos/procesos los núcleos
+esperan a la RAM. Pasar de 8 a 16 no mejora nada (con 12 núcleos físicos, 16 ya
+es sobresuscripción) e incluso empeora un poco.
+
+**5. Nota sobre las tablas.** Los ficheros
+[`resultados_secuencial.csv`](resultados_secuencial.csv) y
+[`resultados_hilos.csv`](resultados_hilos.csv) se midieron en sesiones
+anteriores, con otra carga de máquina; por eso la comparación de la segunda
+tabla se rehízo midiendo las tres versiones seguidas. Para un informe formal
+conviene regenerar los tres barridos del tirón, con los comandos de
+[`commands.txt`](commands.txt).
+
+---
+## 9. Próximos pasos del proyecto
+
+- [x] Versión paralela con hilos POSIX (`src/mmHILOS.c`)
+- [x] Versión paralela con procesos (`src/mmPROCESOS.c`)
+- [x] Medición de *speedup* y eficiencia frente a esta línea base
 - [ ] Versión paralela con OpenMP (`#pragma omp parallel for` sobre el bucle `i`)
-- [ ] Medición de *speedup* y eficiencia frente a esta línea base
 - [ ] Versión por bloques (*tiling*) para mejorar el uso de la caché L2/L3
 - [ ] Versión distribuida con MPI
