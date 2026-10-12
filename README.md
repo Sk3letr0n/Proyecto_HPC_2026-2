@@ -674,7 +674,43 @@ conviene regenerar los tres barridos del tirón, con los comandos de
 [`commands.txt`](commands.txt).
 
 ---
-## 9. Próximos pasos del proyecto
+## 9. Optimización por compilador y por código
+
+Objetivo: medir cuánto se gana **sin paralelizar** y compararlo con el mejor
+*speedup* de hilos y de procesos. Todo usa la misma línea base que la
+paralelización: `matmul` con `-O2` y orden `i-k-j`.
+
+**Por compilador.** Se compila el mismo `matmul.c` con distintas
+[flags de optimización de GCC](https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html),
+un ejecutable por combinación (`bin/matmul_<etiqueta>.exe`): `-O0`, `-O1`,
+`-O2`, `-O3`, `-Ofast`, `-Os`, `-O3 -march=native`, `-O3 -funroll-loops` y
+`-Ofast -march=native -funroll-loops`.
+
+**Por código.** `matmul` acepta `-a <algoritmo>` (solo en la forma con
+banderas) para elegir el núcleo de cálculo:
+
+| `-a` | Núcleo | Acceso a `B` |
+|---|---|---|
+| `ikj` (defecto) | orden `i-k-j`, el original | por filas |
+| `clasico` | orden `i-j-k`, fila × columna | por columnas (salto de `N` enteros) |
+| `traspuesta` | traspone `B` y multiplica fila × fila | por filas de `Bᵀ` |
+
+La traspuesta se construye dentro del tiempo medido, para que la comparación
+sea justa. Los tres núcleos producen exactamente la misma matriz `C`.
+
+Los comandos de compilación, los barridos (8 tamaños de 250 a 2000) y la
+generación de gráficas están en [`commands.txt`](commands.txt).
+[`scripts/graficas.py`](scripts/graficas.py) toma la mediana de los turnos y
+deja en `graficas/` las gráficas de compilador, de código, la comparación de
+4 curvas (mejor compilador, mejor código, mejor número de hilos y mejor número
+de procesos) y la tabla de *speedup* en CSV para Excel.
+
+> Las matrices son de `int`: las opciones de `-Ofast` que relajan el punto
+> flotante no afectan a este código, así que `-Ofast` debería rendir como `-O3`.
+> La ganancia grande viene de `-march=native`, que habilita AVX2.
+
+---
+## 10. Próximos pasos del proyecto
 
 - [x] Versión paralela con hilos POSIX (`src/mmHILOS.c`)
 - [x] Versión paralela con procesos (`src/mmPROCESOS.c`)

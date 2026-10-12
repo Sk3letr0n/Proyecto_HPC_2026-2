@@ -4,13 +4,57 @@ gcc -O2 -Wall -Wextra -std=c11 -pthread -o bin/mmHILOS src/mmHILOS.c -lm
 gcc -O2 -Wall -Wextra -std=c11 -o bin/mmPROCESOS src/mmPROCESOS.c -lm
 
 
-== 1) SECUENCIAL: 10 turnos x (500, 1000, 1500) ==
-"Orden;Tiempo(s);Rendimiento(GOP/s)" | Out-File resultados_secuencial.csv -Encoding utf8; 1..10 | ForEach-Object { foreach ($n in 500,1000,1500) { .\bin\matmul.exe -n $n -l 100 -c | Out-File resultados_secuencial.csv -Encoding utf8 -Append } }
+== COMPILAR VARIANTES DE OPTIMIZACION POR COMPILADOR (PowerShell) ==
+Genera bin/matmul_<etiqueta>.exe, un ejecutable por combinacion de flags
+(ver https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html):
+  O0        -O0                                  sin optimizacion
+  O1        -O1                                  optimizaciones basicas
+  O2        -O2                                  nivel estandar (linea base del proyecto)
+  O3        -O3                                  + vectorizacion agresiva, inlining
+  Ofast     -Ofast                               -O3 + relaja reglas de punto flotante
+  Os        -Os                                  optimiza tamano del binario
+  O3native  -O3 -march=native                    usa todas las instrucciones SIMD de esta CPU (AVX2...)
+  O3unroll  -O3 -funroll-loops                   desenrolla bucles
+  Ofastfull -Ofast -march=native -funroll-loops  todo junto
+
+$flags = [ordered]@{ O0='-O0'; O1='-O1'; O2='-O2'; O3='-O3'; Ofast='-Ofast'; Os='-Os'; O3native='-O3 -march=native'; O3unroll='-O3 -funroll-loops'; Ofastfull='-Ofast -march=native -funroll-loops' }; foreach ($k in $flags.Keys) { gcc $flags[$k].Split(' ') -Wall -Wextra -Wpedantic -std=c11 -o "bin/matmul_$k" src/matmul.c -lm }
 
 
-== 2) HILOS: 10 turnos x (500, 1000, 1500) x (2, 4, 8, 16 hilos) ==
-"Orden;NumHilos;Tiempo(s);Rendimiento(GOP/s)" | Out-File resultados_hilos.csv -Encoding utf8; 1..10 | ForEach-Object { foreach ($n in 500,1000,1500) { foreach ($t in 2,4,8,16) { .\bin\mmHILOS.exe -n $n -l 100 -t $t -c | Out-File resultados_hilos.csv -Encoding utf8 -Append } } }
+Tamanos de matriz usados en todos los barridos: 250, 500, 750, 1000, 1250, 1500, 1750, 2000
 
 
-== 3) PROCESOS: 10 turnos x (500, 1000, 1500) x (2, 4, 8, 16 procesos) ==
-"Orden;NumProcesos;Tiempo(s);Rendimiento(GOP/s)" | Out-File resultados_procesos.csv -Encoding utf8; 1..10 | ForEach-Object { foreach ($n in 500,1000,1500) { foreach ($np in 2,4,8,16) { .\bin\mmPROCESOS.exe -n $n -l 100 -np $np -c | Out-File resultados_procesos.csv -Encoding utf8 -Append } } }
+== 1) SECUENCIAL (linea base, -O2 i-k-j): 10 turnos x 8 tamanos ==
+"Orden;Tiempo(s);Rendimiento(GOP/s)" | Out-File resultados_secuencial.csv -Encoding utf8; 1..10 | ForEach-Object { foreach ($n in 250,500,750,1000,1250,1500,1750,2000) { .\bin\matmul.exe -n $n -l 100 -c | Out-File resultados_secuencial.csv -Encoding utf8 -Append } }
+
+
+== 2) HILOS: 10 turnos x 8 tamanos x (2, 4, 8, 16 hilos) ==
+"Orden;NumHilos;Tiempo(s);Rendimiento(GOP/s)" | Out-File resultados_hilos.csv -Encoding utf8; 1..10 | ForEach-Object { foreach ($n in 250,500,750,1000,1250,1500,1750,2000) { foreach ($t in 2,4,8,16) { .\bin\mmHILOS.exe -n $n -l 100 -t $t -c | Out-File resultados_hilos.csv -Encoding utf8 -Append } } }
+
+
+== 3) PROCESOS: 10 turnos x 8 tamanos x (2, 4, 8, 16 procesos) ==
+"Orden;NumProcesos;Tiempo(s);Rendimiento(GOP/s)" | Out-File resultados_procesos.csv -Encoding utf8; 1..10 | ForEach-Object { foreach ($n in 250,500,750,1000,1250,1500,1750,2000) { foreach ($np in 2,4,8,16) { .\bin\mmPROCESOS.exe -n $n -l 100 -np $np -c | Out-File resultados_procesos.csv -Encoding utf8 -Append } } }
+
+
+== 4) OPTIMIZACION (compilador + codigo): 10 turnos x 9 flags x 3 algoritmos x 8 tamanos ==
+Requiere haber compilado las variantes. Algoritmos (opcion -a de matmul):
+  clasico     i-j-k, fila x columna (definicion de libro, B recorrida por columnas)
+  ikj         i-k-j, el codigo original usado como linea base
+  traspuesta  se traspone B y se multiplica fila x fila
+Las dos primeras columnas de cada linea son la etiqueta de flags y el algoritmo.
+Tarda alrededor de 1 hora (casi todo es -O0 y el algoritmo clasico con N grande).
+
+"Flags;Algoritmo;Orden;Tiempo(s);Rendimiento(GOP/s)" | Out-File resultados_optimizacion.csv -Encoding utf8; 1..10 | ForEach-Object { foreach ($f in 'O0','O1','O2','O3','Ofast','Os','O3native','O3unroll','Ofastfull') { foreach ($a in 'clasico','ikj','traspuesta') { foreach ($n in 250,500,750,1000,1250,1500,1750,2000) { "$f;$a;" + (& ".\bin\matmul_$f.exe" -n $n -l 100 -a $a -c) | Out-File resultados_optimizacion.csv -Encoding utf8 -Append } } } }
+
+
+== 5) GRAFICAS Y TABLA DE SPEEDUP ==
+Requiere los cuatro CSV anteriores. Deja en graficas/:
+  1_compilador_niveles.png   rendimiento de -O0, -O1, -O2, -O3, -Ofast, -Os
+  2_compilador_flags.png     rendimiento de -O3 y sus combinaciones de flags
+  3_codigo_traspuesta.png    clasico vs i-k-j vs traspuesta en -O0, -O2, -O3, -Ofast
+  4_comparacion_speedup.png  4 curvas: mejor compilador, mejor codigo (traspuesta),
+                             mejor numero de hilos y mejor numero de procesos
+  tabla_speedup.csv          tiempo, speedup y eficiencia de esas 4 curvas (para Excel)
+  tabla_paralelizacion.csv   speedup y eficiencia de cada numero de hilos/procesos
+  tabla_optimizacion.csv     mediana de cada combinacion flags x algoritmo x N
+
+python scripts/graficas.py

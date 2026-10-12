@@ -208,6 +208,75 @@ static void matriz_multiplicar(const Matriz *A, const Matriz *B, Matriz *C)
 }
 
 /* ---------------------------------------------------------------------------
+ *  MULTIPLICACION CLASICA "FILA x COLUMNA" (orden i-j-k)
+ *
+ *  Es la definicion de libro:  C[i][j] = suma_k A[i][k] * B[k][j].
+ *  El bucle interno recorre B POR COLUMNAS: cada iteracion salta n enteros
+ *  en memoria, asi que casi cada acceso a B es un fallo de cache. Se incluye
+ *  como punto de partida de la optimizacion por codigo.
+ * ------------------------------------------------------------------------- */
+static void matriz_multiplicar_clasico(const Matriz *A, const Matriz *B, Matriz *C)
+{
+    int n = A->n;
+
+    for (int i = 0; i < n; i++) {
+        const int *fila_a = A->fila[i];
+        for (int j = 0; j < n; j++) {
+            int suma = 0;
+            for (int k = 0; k < n; k++) {
+                suma += fila_a[k] * B->fila[k][j];
+            }
+            C->fila[i][j] = suma;
+        }
+    }
+}
+
+/* ---------------------------------------------------------------------------
+ *  MULTIPLICACION CON TRASPUESTA "FILA x FILA"
+ *
+ *  Primero se construye BT = traspuesta de B, de modo que la columna j de B
+ *  pasa a ser la FILA j de BT. Entonces:
+ *
+ *        C[i][j] = suma_k A[i][k] * BT[j][k]
+ *
+ *  y el bucle interno recorre DOS FILAS contiguas (una de A y una de BT):
+ *  acceso lineal, sin saltos, y el compilador lo puede vectorizar como un
+ *  producto punto. La traspuesta cuesta O(n^2) frente al O(n^3) del producto
+ *  y se incluye en el tiempo medido para que la comparacion sea justa.
+ *
+ *  Devuelve 0 si no hubo memoria para BT.
+ * ------------------------------------------------------------------------- */
+static int matriz_multiplicar_traspuesta(const Matriz *A, const Matriz *B, Matriz *C)
+{
+    int n = A->n;
+
+    Matriz *BT = matriz_crear(n);
+    if (BT == NULL) return 0;
+
+    for (int k = 0; k < n; k++) {
+        for (int j = 0; j < n; j++) {
+            BT->fila[j][k] = B->fila[k][j];
+        }
+    }
+
+    for (int i = 0; i < n; i++) {
+        const int *fila_a = A->fila[i];
+        int       *fila_c = C->fila[i];
+        for (int j = 0; j < n; j++) {
+            const int *fila_bt = BT->fila[j];
+            int suma = 0;
+            for (int k = 0; k < n; k++) {
+                suma += fila_a[k] * fila_bt[k];
+            }
+            fila_c[j] = suma;
+        }
+    }
+
+    matriz_liberar(BT);
+    return 1;
+}
+
+/* ---------------------------------------------------------------------------
  *  Formatea un double con coma decimal (ej. 0,004 en vez de 0.004), que es lo
  *  que espera Excel con configuracion regional en espanol. Se reemplaza el
  *  punto a mano para no depender del locale del sistema.
@@ -255,7 +324,7 @@ static const char *nombre_programa(const char *ruta)
 static void mostrar_uso(const char *prog)
 {
     printf(
-    "Uso: %s -n <tamano> -l <limite> [-s <semilla>] [-p] [-c]\n"
+    "Uso: %s -n <tamano> -l <limite> [-s <semilla>] [-a <algoritmo>] [-p] [-c]\n"
     "     %s <tamano> <limite> [semilla] [-p] [-c]\n"
     "\n"
     "Opciones:\n"
@@ -268,7 +337,11 @@ static void mostrar_uso(const char *prog)
     "                 (obligatorio). Debe cumplir  N * limite^2 <= %d.\n"
     "  -s <semilla>   Semilla del generador aleatorio. Por defecto usa el reloj.\n"
     "                 Fijarla permite reproducir exactamente la misma ejecucion.\n"
-    "  -p             Imprime las matrices A, B y C (usar solo con N pequeno).\n"
+    "  -a <algoritmo> Nucleo de multiplicacion (por defecto ikj):\n"
+    "                   ikj         orden i-k-j, B y C recorridas por filas\n"
+    "                   clasico     orden i-j-k, fila x columna (de libro)\n"
+    "                   traspuesta  traspone B y multiplica fila x fila\n"
+    "  -p           Imprime las matrices A, B y C (usar solo con N pequeno).\n"
     "  -c             Salida en una sola linea separada por ';' (para Excel):\n"
     "                   Orden;Tiempo(s);Rendimiento(GOP/s)\n"
     "  -h             Muestra esta ayuda.\n"
@@ -363,6 +436,7 @@ int main(int argc, char *argv[])
     long semilla = -1;      /* semilla del generador */
     int  imprimir = 0;      /* bandera -p            */
     int  modo_csv = 0;      /* bandera -c            */
+    const char *algoritmo = "ikj";   /* opcion -a    */
     long valor = 0;
 
     /* Nombre corto del ejecutable, para los mensajes de ayuda. */
@@ -423,6 +497,15 @@ int main(int argc, char *argv[])
                 continue;
             }
 
+            if (strcmp(op, "-a") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "Error: la opcion -a requiere un valor.\n");
+                    return EXIT_FAILURE;
+                }
+                algoritmo = argv[++i];
+                continue;
+            }
+
             if (strcmp(op, "-l") == 0 || strcmp(op, "-s") == 0) {
                 if (i + 1 >= argc) {
                     fprintf(stderr, "Error: la opcion %s requiere un valor.\n", op);
@@ -470,6 +553,13 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
+    if (strcmp(algoritmo, "ikj") != 0 && strcmp(algoritmo, "clasico") != 0 &&
+        strcmp(algoritmo, "traspuesta") != 0) {
+        fprintf(stderr, "Error: algoritmo '%s' desconocido. "
+                        "Use ikj, clasico o traspuesta.\n", algoritmo);
+        return EXIT_FAILURE;
+    }
+
     /* Semilla: si no se indico, se toma del reloj del sistema. */
     if (semilla < 0) semilla = (long)time(NULL);
     srand((unsigned int)semilla);
@@ -492,7 +582,18 @@ int main(int argc, char *argv[])
 
     /* ----- 5. Multiplicacion cronometrada ----- */
     double t_inicio = reloj_segundos();
-    matriz_multiplicar(A, B, C);
+    if (strcmp(algoritmo, "clasico") == 0) {
+        matriz_multiplicar_clasico(A, B, C);
+    } else if (strcmp(algoritmo, "traspuesta") == 0) {
+        if (!matriz_multiplicar_traspuesta(A, B, C)) {
+            matriz_liberar(A);
+            matriz_liberar(B);
+            matriz_liberar(C);
+            return EXIT_FAILURE;
+        }
+    } else {
+        matriz_multiplicar(A, B, C);
+    }
     double t_fin = reloj_segundos();
     double segundos = t_fin - t_inicio;
 
@@ -519,6 +620,7 @@ int main(int argc, char *argv[])
         printf("  Rango de las celdas   : [1, %ld]\n", limite);
         printf("  Limite maximo seguro  : %d\n", lmax);
         printf("  Semilla aleatoria     : %ld\n", semilla);
+        printf("  Algoritmo             : %s\n", algoritmo);
         printf("  Memoria por matriz    : %.2f MiB (x3 = %.2f MiB)\n", mib, mib * 3);
         printf("  Operaciones enteras   : %.3e\n", operaciones);
         printf("  Tiempo de calculo     : %.6f s\n", segundos);
