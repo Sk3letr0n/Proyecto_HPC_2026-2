@@ -58,3 +58,71 @@ Requiere los cuatro CSV anteriores. Deja en graficas/:
   tabla_optimizacion.csv     mediana de cada combinacion flags x algoritmo x N
 
 python scripts/graficas.py
+
+
+== OPENMP ==
+
+Sentinela: #pragma omp (directiva ignorada si se compila sin -fopenmp)
+Cabecera:  #include <omp.h>
+Directiva usada (ganadora del analisis): #pragma omp parallel for schedule(static)
+
+== COMPILAR mmOPENMP (PowerShell) ==
+gcc -O2 -fopenmp -Wall -Wextra -std=c11 -o bin/mmOPENMP src/mmOPENMP.c -lm
+
+== EJECUTAR mmOPENMP ==
+
+  Con opcion -t (numero de hilos desde la linea de comandos):
+.\bin\mmOPENMP.exe -n 1000 -l 100 -t 4
+
+  Con variable de entorno OMP_NUM_THREADS:
+$env:OMP_NUM_THREADS = 8; .\bin\mmOPENMP.exe -n 1000 -l 100
+
+  Prueba rapida con impresion (matrices pequenas):
+.\bin\mmOPENMP.exe -n 5 -l 9 -s 42 -p
+
+  Benchmark rapido (1,2,4,8,16 hilos en N=1000):
+foreach ($t in 1,2,4,8,16) { .\bin\mmOPENMP.exe -n 1000 -l 100 -t $t -c }
+
+
+== 6) OPENMP: 10 turnos x 8 tamanos x (2, 4, 8, 16 hilos) ==
+"Orden;NumHilos;Tiempo(s);Rendimiento(GOP/s)" | Out-File resultados_openmp.csv -Encoding utf8; 1..10 | ForEach-Object { foreach ($n in 250,500,750,1000,1250,1500,1750,2000) { foreach ($t in 2,4,8,16) { .\bin\mmOPENMP.exe -n $n -l 100 -t $t -c | Out-File resultados_openmp.csv -Encoding utf8 -Append } } }
+
+
+== COMPILAR LOS 6 TESTS DE COMPARACION DE DIRECTIVAS (PowerShell) ==
+foreach ($t in 'test1_parallel_for','test2_parallel_for_if','test3_parallel_for_simd','test4_num_threads','test5_collapse','test6_task') { gcc -O2 -fopenmp -Wall -Wextra -std=c11 -I tests_openmp -o "bin/$t" "tests_openmp/$t.c" -lm }
+
+== EJECUTAR COMPARACION RAPIDA (N=1000, 8 hilos) ==
+foreach ($t in @('test1_parallel_for','test2_parallel_for_if','test3_parallel_for_simd','test4_num_threads','test5_collapse','test6_task')) { & ".\bin\$t.exe" 1000 8 }
+
+== EJECUTAR COMPARACION CON N PEQUENO (N=50, 8 hilos) ==
+foreach ($t in @('test1_parallel_for','test2_parallel_for_if','test3_parallel_for_simd','test4_num_threads','test5_collapse','test6_task')) { & ".\bin\$t.exe" 50 8 }
+
+
+== VARIABLES DE ENTORNO OPENMP (no requieren recompilar) ==
+  $env:OMP_NUM_THREADS = 8                  # cuantos hilos usar
+  $env:OMP_SCHEDULE = "static"              # como repartir iteraciones (static, dynamic, guided, auto)
+  $env:OMP_SCHEDULE = "dynamic,64"          # dynamic con bloques de 64 filas
+  $env:OMP_PROC_BIND = "close"              # pegar hilos a nucleos cercanos (NOTA: MinGW no lo soporta en Windows, da warning inofensivo)
+  $env:OMP_PLACES = "cores"                 # hilos en nucleos fisicos (NOTA: idem, requiere MSVC o Linux)
+  $env:OMP_WAIT_POLICY = "active"           # hilos ociosos dan vueltas (mas rapido en benchmarks)
+  $env:OMP_DISPLAY_ENV = "true"             # mostrar TODA la config OMP al arrancar
+  $env:OMP_DYNAMIC = "false"                # no dejar que el runtime reduzca hilos
+
+  Ejemplo completo:
+  $env:OMP_NUM_THREADS=8; $env:OMP_SCHEDULE="static"; $env:OMP_PROC_BIND="close"; $env:OMP_PLACES="cores"; $env:OMP_WAIT_POLICY="active"; .\bin\mmOPENMP.exe -n 1000 -l 100
+
+  Para limpiar variables despues de probar:
+  Remove-Item Env:OMP_SCHEDULE -ErrorAction SilentlyContinue
+  Remove-Item Env:OMP_DISPLAY_ENV -ErrorAction SilentlyContinue
+
+
+== NOTAS SOBRE OpenMP ==
+  - OpenMP ya viene incluido con gcc (MinGW). No hace falta instalar nada extra.
+  - La flag -fopenmp activa tanto la compilacion como el enlace de la libreria.
+  - Sin -fopenmp, los #pragma omp se ignoran y el programa corre secuencial.
+  - OMP_NUM_THREADS controla hilos sin recompilar. La opcion -t hace lo mismo.
+  - OMP_SCHEDULE controla la politica de reparto sin recompilar (static, dynamic, guided).
+  - omp_set_dynamic(0) asegura que se usen exactamente los hilos pedidos.
+  - mmOPENMP.c usa schedule(runtime) para poder controlar el reparto con OMP_SCHEDULE.
+  - Por defecto usa "static" (si OMP_SCHEDULE no esta fijada).
+  - Analisis completo de las 6 directivas y variables: ver analisis_openmp.md
