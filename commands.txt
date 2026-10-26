@@ -47,15 +47,17 @@ Tarda alrededor de 1 hora (casi todo es -O0 y el algoritmo clasico con N grande)
 
 
 == 5) GRAFICAS Y TABLA DE SPEEDUP ==
-Requiere los cuatro CSV anteriores. Deja en graficas/:
+Requiere los CSV de los barridos 1-4, 6b (resultados_openmp_ryzen5600g.csv)
+y 7a (resultados_perfilado.csv). Deja en graficas/:
   1_compilador_niveles.png   rendimiento de -O0, -O1, -O2, -O3, -Ofast, -Os
   2_compilador_flags.png     rendimiento de -O3 y sus combinaciones de flags
   3_codigo_traspuesta.png    clasico vs i-k-j vs traspuesta en -O0, -O2, -O3, -Ofast
-  4_comparacion_speedup.png  4 curvas: mejor compilador, mejor codigo (traspuesta),
-                             mejor numero de hilos y mejor numero de procesos
-  tabla_speedup.csv          tiempo, speedup y eficiencia de esas 4 curvas (para Excel)
-  tabla_paralelizacion.csv   speedup y eficiencia de cada numero de hilos/procesos
+  4_comparacion_speedup.png  5 curvas: mejor compilador, mejor codigo (traspuesta),
+                             mejor numero de hilos, de procesos y de hilos OpenMP
+  tabla_speedup.csv          tiempo, speedup y eficiencia de esas 5 curvas (para Excel)
+  tabla_paralelizacion.csv   speedup y eficiencia de cada numero de hilos/procesos/OpenMP
   tabla_optimizacion.csv     mediana de cada combinacion flags x algoritmo x N
+  tabla_perfilado.csv        mediana de CPU y memoria de cada version x unidades x N
 
 python scripts/graficas.py
 
@@ -86,6 +88,40 @@ foreach ($t in 1,2,4,8,16) { .\bin\mmOPENMP.exe -n 1000 -l 100 -t $t -c }
 
 == 6) OPENMP: 10 turnos x 8 tamanos x (2, 4, 8, 16 hilos) ==
 "Orden;NumHilos;Tiempo(s);Rendimiento(GOP/s)" | Out-File resultados_openmp.csv -Encoding utf8; 1..10 | ForEach-Object { foreach ($n in 250,500,750,1000,1250,1500,1750,2000) { foreach ($t in 2,4,8,16) { .\bin\mmOPENMP.exe -n $n -l 100 -t $t -c | Out-File resultados_openmp.csv -Encoding utf8 -Append } } }
+
+
+== 6b) OPENMP EN ESTE EQUIPO (AMD Ryzen 5 5600G, 6 nucleos / 12 hilos) ==
+Mismo barrido que el 6), pero en el equipo donde se midieron secuencial,
+hilos y procesos, para que el speedup de OpenMP sea comparable con ellos.
+Se guarda en un CSV aparte para no pisar resultados_openmp.csv (otro equipo).
+"Orden;NumHilos;Tiempo(s);Rendimiento(GOP/s)" | Out-File resultados_openmp_ryzen5600g.csv -Encoding utf8; 1..10 | ForEach-Object { foreach ($n in 250,500,750,1000,1250,1500,1750,2000) { foreach ($t in 2,4,8,16) { .\bin\mmOPENMP.exe -n $n -l 100 -t $t -c | Out-File resultados_openmp_ryzen5600g.csv -Encoding utf8 -Append } } }
+
+
+== 7) PERFILADO DE CPU Y MEMORIA ==
+Dos herramientas complementarias:
+
+  a) bin/perfil.exe (scripts/perfil.c): ejecuta el programa dentro de un Job
+     Object de Windows y mide el arbol de procesos completo (incluye los hijos
+     de mmPROCESOS): tiempo de pared, CPU usuario y kernel, nucleos usados en
+     promedio, pico de memoria comprometida, pico de working set y fallos de
+     pagina. Mide el programa completo, no solo la multiplicacion.
+  b) gprof: perfil de CPU por funcion del secuencial (en que funcion se va el
+     tiempo). Requiere -pg -no-pie (sin -no-pie MinGW no toma muestras) y
+     -fno-inline para que cada funcion aparezca por separado.
+
+-- Compilar el medidor --
+gcc -O2 -Wall -Wextra -std=c11 -o bin/perfil scripts/perfil.c -lpsapi
+
+-- a) Barrido de perfilado: 5 turnos x 4 tamanos x 14 configuraciones --
+Versiones: secuencial -O2 i-k-j (linea base), optimizado (-Ofast -march=native
+-funroll-loops + traspuesta) y hilos / procesos / OpenMP con 2, 4, 8 y 16.
+"Version;Unidades;Orden;Pared(s);CPUUsuario(s);CPUKernel(s);UsoCPU(nucleos);MemoriaPico(MiB);WorkingSet(MiB);FallosPagina" | Out-File resultados_perfilado.csv -Encoding utf8; $cfg = @('secuencial|1|bin\matmul.exe', 'optimizado|1|bin\matmul_Ofastfull.exe -a traspuesta') + (2,4,8,16 | ForEach-Object { "hilos|$_|bin\mmHILOS.exe -t $_", "procesos|$_|bin\mmPROCESOS.exe -np $_", "openmp|$_|bin\mmOPENMP.exe -t $_" }); 1..5 | ForEach-Object { foreach ($n in 500,1000,1500,2000) { foreach ($c in $cfg) { $v, $u, $exe = $c.Split('|'); "$v;$u;$n;" + (& .\bin\perfil.exe ("$exe -n $n -l 100 -c").Split(' ')) | Out-File resultados_perfilado.csv -Encoding utf8 -Append } } }
+
+-- b) gprof: perfil por funcion, N=1500, con -O2 y con las mejores flags --
+New-Item -ItemType Directory -Force perfilado | Out-Null; foreach ($f in @(@('O2','-O2'), @('Ofastfull','-Ofast -march=native -funroll-loops'))) { gcc $f[1].Split(' ') -pg -no-pie -fno-inline -std=c11 -o "bin/matmul_pg_$($f[0])" src/matmul.c -lm; foreach ($a in 'clasico','ikj','traspuesta') { Remove-Item gmon.out -ErrorAction SilentlyContinue; & ".\bin\matmul_pg_$($f[0]).exe" -n 1500 -l 100 -a $a -c | Out-Null; gprof -b -p "bin\matmul_pg_$($f[0]).exe" gmon.out | Out-File "perfilado\gprof_$($f[0])_$a.txt" -Encoding utf8 } }; Remove-Item gmon.out
+
+-- Datos del equipo (para el documento) --
+Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed,L2CacheSize,L3CacheSize | Format-List | Out-File perfilado\equipo.txt -Encoding utf8; "RAM (GiB): " + [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB,1) | Out-File perfilado\equipo.txt -Encoding utf8 -Append; (Get-CimInstance Win32_OperatingSystem).Caption | Out-File perfilado\equipo.txt -Encoding utf8 -Append; gcc --version | Select-Object -First 1 | Out-File perfilado\equipo.txt -Encoding utf8 -Append
 
 
 == COMPILAR LOS 6 TESTS DE COMPARACION DE DIRECTIVAS (PowerShell) ==

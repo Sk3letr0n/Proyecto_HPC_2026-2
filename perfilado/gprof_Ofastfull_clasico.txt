@@ -1,0 +1,7 @@
+﻿Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  Ts/call  Ts/call  name    
+100.00      3.66     3.66                             matriz_multiplicar_clasico
+  0.00      3.66     0.00       19     0.00     0.00  __gcc_deregister_frame

@@ -1,0 +1,14 @@
+﻿
+
+Name                      : AMD Ryzen 5 5600G with Radeon Graphics         
+NumberOfCores             : 6
+NumberOfLogicalProcessors : 12
+MaxClockSpeed             : 3901
+L2CacheSize               : 3072
+L3CacheSize               : 16384
+
+
+
+RAM (GiB): 31.9
+Microsoft Windows 10 Pro
+gcc.exe (Rev6, Built by MSYS2 project) 13.1.0

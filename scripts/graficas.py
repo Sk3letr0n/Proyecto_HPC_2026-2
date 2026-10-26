@@ -7,16 +7,22 @@ decimal, como los espera Excel en espanol) y produce en la carpeta graficas/:
   1_compilador_niveles.png   GOP/s vs N para -O0, -O1, -O2, -O3, -Ofast, -Os
   2_compilador_flags.png     GOP/s vs N para -O3 y sus combinaciones de flags
   3_codigo_traspuesta.png    clasico vs ikj vs traspuesta en -O0/-O2/-O3/-Ofast
-  4_comparacion_speedup.png  las 4 curvas: mejor compilador, mejor codigo,
-                             mejor numero de hilos y mejor numero de procesos
-  tabla_speedup.csv          tiempo, speedup y eficiencia de esas 4 curvas
-  tabla_paralelizacion.csv   speedup y eficiencia de cada numero de hilos/procesos
+  4_comparacion_speedup.png  5 curvas: mejor compilador, mejor codigo y el
+                             mejor numero de hilos, de procesos y de OpenMP
+  tabla_speedup.csv          tiempo, speedup y eficiencia de esas 5 curvas
+  tabla_paralelizacion.csv   speedup y eficiencia de cada numero de
+                             hilos/procesos/hilos OpenMP
   tabla_optimizacion.csv     mediana de tiempo/GOP/s/speedup de cada combinacion
+  tabla_perfilado.csv        mediana de CPU y memoria de cada configuracion
+                             (resultados_perfilado.csv)
 
 Cada punto es la MEDIANA de los turnos medidos (robusta frente a turnos
 perturbados por el sistema operativo). El speedup se calcula contra la misma
 linea base que la paralelizacion: matmul.exe compilado con -O2 (orden i-k-j),
 es decir resultados_secuencial.csv.
+
+OpenMP se lee de resultados_openmp_ryzen5600g.csv, medido en el mismo equipo
+que la linea base (resultados_openmp.csv es de otro equipo y no es comparable).
 
 Uso (desde la raiz del repositorio):
     python scripts/graficas.py
@@ -31,6 +37,7 @@ import pandas as pd
 
 RAIZ = Path(__file__).resolve().parent.parent
 SALIDA = RAIZ / "graficas"
+CSV_OPENMP = "resultados_openmp_ryzen5600g.csv"
 
 # Paleta categorica en orden fijo (nunca ciclada).
 COLORES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
@@ -118,6 +125,7 @@ def main():
     hil = con_speedup(medianas(leer("resultados_hilos.csv"), ["NumHilos"]), base)
     pro = con_speedup(medianas(leer("resultados_procesos.csv"),
                                ["NumProcesos"]), base)
+    omp = con_speedup(medianas(leer(CSV_OPENMP), ["NumHilos"]), base)
 
     # --- 1 y 2: optimizacion por compilador (codigo original i-k-j) ---------
     ikj = opt[opt["Algoritmo"] == "ikj"]
@@ -146,18 +154,20 @@ def main():
     fig.savefig(SALIDA / "3_codigo_traspuesta.png", dpi=150)
     plt.close(fig)
 
-    # --- 4: las cuatro mejores curvas ---------------------------------------
+    # --- 4: las mejores curvas de optimizacion y de paralelizacion ----------
     f_comp = mejor(ikj, "Flags")
     tras = opt[opt["Algoritmo"] == "traspuesta"]
     f_cod = mejor(tras, "Flags")
     h = mejor(hil, "NumHilos")
     p = mejor(pro, "NumProcesos")
+    o = mejor(omp, "NumHilos")
 
     curvas = [
         (f"Compilador: {ETIQUETA_FLAGS[f_comp]} (i-k-j)", ikj[ikj["Flags"] == f_comp], 1),
         (f"Código: traspuesta {ETIQUETA_FLAGS[f_cod]}", tras[tras["Flags"] == f_cod], 1),
         (f"Hilos: {h} hilos (-O2)", hil[hil["NumHilos"] == h], h),
         (f"Procesos: {p} procesos (-O2)", pro[pro["NumProcesos"] == p], p),
+        (f"OpenMP: {o} hilos (-O2)", omp[omp["NumHilos"] == o], o),
     ]
 
     fig, ax = plt.subplots(figsize=(11, 5))
@@ -190,6 +200,7 @@ def main():
     paral = pd.concat([
         hil.rename(columns={"NumHilos": "Unidades"}).assign(Version="hilos"),
         pro.rename(columns={"NumProcesos": "Unidades"}).assign(Version="procesos"),
+        omp.rename(columns={"NumHilos": "Unidades"}).assign(Version="openmp"),
     ])
     paral["Eficiencia"] = paral["Speedup"] / paral["Unidades"]
     paral = paral[["Version", "Unidades", "Orden", "Tiempo", "GOPS",
@@ -201,6 +212,12 @@ def main():
     opt.sort_values(["Algoritmo", "Flags", "Orden"]).to_csv(
         SALIDA / "tabla_optimizacion.csv", sep=";", decimal=",", index=False,
         float_format="%.4f", encoding="utf-8-sig")
+
+    perf = leer("resultados_perfilado.csv")
+    perf = (perf.groupby(["Version", "Unidades", "Orden"], as_index=False)
+                .median(numeric_only=True))
+    perf.to_csv(SALIDA / "tabla_perfilado.csv", sep=";", decimal=",",
+                index=False, float_format="%.4f", encoding="utf-8-sig")
 
     pd.set_option("display.width", 200)
     print("Tabla de speedup (mediana de los turnos):\n")
