@@ -1,0 +1,5 @@
+CPU   : AMD Ryzen 5 5600G with Radeon Graphics         
+Nucleos fisicos / logicos: 6 / 12
+RAM   : 31,9 GiB
+SO    : Microsoft Windows 10 Pro
+GCC   : gcc.exe (Rev6, Built by MSYS2 project) 13.1.0

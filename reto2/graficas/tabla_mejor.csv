@@ -1,0 +1,5 @@
+alg;variante;config;tiempo_s;Mmps;N;pi;error_abs
+dartboard;opt;O2;0,2626;3807,4207;1000000000;3,1416;0,0000
+needles;opt;O2;0,4634;1079,0024;500000000;3,1414;0,0002
+dartboard;opt;Ofastnative;0,2514;3977,3134;1000000000;3,1416;0,0000
+needles;opt;Ofastnative;0,4009;1247,2965;500000000;3,1414;0,0002

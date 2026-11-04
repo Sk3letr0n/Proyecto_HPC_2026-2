@@ -1,0 +1,12 @@
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  Ts/call  Ts/call  name    
+ 57.84      2.14     2.14                             _mcount_private
+ 28.38      3.19     1.05                             __fentry__
+  6.76      3.44     0.25                             xo_siguiente
+  2.97      3.55     0.11                             xo_double
+  2.16      3.63     0.08                             rotl64
+  1.89      3.70     0.07                             contar_bloques
+  0.00      3.70     0.00 800000010     0.00     0.00  __gcc_deregister_frame

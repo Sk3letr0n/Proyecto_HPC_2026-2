@@ -1,0 +1,13 @@
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  Ts/call  Ts/call  name    
+ 72.55      0.74     0.74                             __sinl_internal
+ 12.75      0.87     0.13                             aguja_rand
+  6.86      0.94     0.07                             sin
+  2.94      0.97     0.03                             _mcount_private
+  1.96      0.99     0.02                             __fentry__
+  1.96      1.01     0.02                             contar_rand
+  0.98      1.02     0.01                             rand
+  0.00      1.02     0.00 20000005     0.00     0.00  __gcc_deregister_frame
